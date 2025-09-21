@@ -16,6 +16,9 @@ export default defineConfig({
                   __dirname,
                   'plugins/rsbuild-plugin-auto-tracking/loader.js',
                 ),
+                options: {
+                  outputTransformedFiles: true, // 可以设置为 false 来禁用文件输出
+                },
               },
             ],
             exclude: /node_modules/,
