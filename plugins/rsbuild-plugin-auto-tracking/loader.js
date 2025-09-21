@@ -68,6 +68,7 @@ function outputTransformedFile(originalPath, transformedCode) {
 function trackingPlugin({ types: t }) {
   let hasTrackingAttributes = false;
   let trackingElements = [];
+  let showElements = []; // Stores { refName, trackValue } for show events
 
   return {
     visitor: {
@@ -75,12 +76,14 @@ function trackingPlugin({ types: t }) {
         enter(path) {
           hasTrackingAttributes = false;
           trackingElements = [];
+          showElements = [];
         },
         exit(path) {
           // 如果检测到埋点属性，添加 import 语句和 useEffect
           if (hasTrackingAttributes) {
             addTrackingImport(path, t);
             addTrackingUseEffect(path, t, trackingElements);
+            addShowTrackingUseEffect(path, t, showElements);
           }
         },
       },
@@ -103,6 +106,7 @@ function trackingPlugin({ types: t }) {
             trackShowValue,
             trackClickValue,
             trackingElements,
+            showElements,
           );
         }
       },
@@ -202,6 +206,7 @@ function addTrackingRefAndEvents(
   trackShowValue,
   trackClickValue,
   trackingElements,
+  showElements,
 ) {
   const { node } = path;
   const attributes = node.openingElement.attributes;
@@ -216,51 +221,239 @@ function addTrackingRefAndEvents(
   );
   attributes.push(refAttr);
 
-  // 添加 onLoad 事件处理（用于 data-track-show）
-  if (trackShowValue) {
-    const onLoadAttr = t.jsxAttribute(
-      t.jsxIdentifier('onLoad'),
-      t.jsxExpressionContainer(
-        t.arrowFunctionExpression(
-          [],
-          t.blockStatement([
-            t.ifStatement(
-              t.memberExpression(
-                t.identifier('window'),
-                t.identifier('tracking'),
-              ),
-              t.blockStatement([
-                t.expressionStatement(
-                  t.callExpression(
-                    t.memberExpression(
-                      t.memberExpression(
-                        t.identifier('window'),
-                        t.identifier('tracking'),
-                      ),
-                      t.identifier('show'),
-                    ),
-                    [
-                      typeof trackShowValue === 'string'
-                        ? t.stringLiteral(trackShowValue)
-                        : trackShowValue,
-                    ],
-                  ),
-                ),
-              ]),
-            ),
-          ]),
-        ),
-      ),
-    );
-    attributes.push(onLoadAttr);
-  }
-
   // 记录需要添加点击事件的元素
   if (trackClickValue) {
     trackingElements.push({
       refName,
       trackValue: trackClickValue,
     });
+  }
+
+  // 记录需要添加显示事件的元素
+  if (trackShowValue) {
+    showElements.push({
+      refName,
+      trackValue: trackShowValue,
+    });
+  }
+}
+
+/**
+ * 添加 useEffect 来处理显示事件（使用 IntersectionObserver）
+ */
+function addShowTrackingUseEffect(path, t, showElements) {
+  if (showElements.length === 0) return;
+
+  // 生成 observer ref 声明
+  const observerRefDeclarations = showElements.map(({ refName }, index) => {
+    const observerRefName = `observerRef${index}`;
+    return t.variableDeclaration('const', [
+      t.variableDeclarator(
+        t.identifier(observerRefName),
+        t.callExpression(t.identifier('useRef'), [t.nullLiteral()]),
+      ),
+    ]);
+  });
+
+  // 生成 useEffect 代码
+  const useEffectStatements = [];
+  const cleanupStatements = [];
+
+  showElements.forEach(({ refName, trackValue }, index) => {
+    const observerRefName = `observerRef${index}`;
+    const trackValueExpr =
+      typeof trackValue === 'string' ? t.stringLiteral(trackValue) : trackValue;
+
+    // 添加 IntersectionObserver 代码
+    useEffectStatements.push(
+      t.ifStatement(
+        t.memberExpression(t.identifier(refName), t.identifier('current')),
+        t.blockStatement([
+          t.variableDeclaration('const', [
+            t.variableDeclarator(
+              t.identifier('element'),
+              t.memberExpression(
+                t.identifier(refName),
+                t.identifier('current'),
+              ),
+            ),
+          ]),
+          // 检查是否已经有 observer，如果有则先断开
+          t.ifStatement(
+            t.memberExpression(
+              t.identifier(observerRefName),
+              t.identifier('current'),
+            ),
+            t.blockStatement([
+              t.expressionStatement(
+                t.callExpression(
+                  t.memberExpression(
+                    t.memberExpression(
+                      t.identifier(observerRefName),
+                      t.identifier('current'),
+                    ),
+                    t.identifier('disconnect'),
+                  ),
+                  [],
+                ),
+              ),
+            ]),
+          ),
+          // 创建新的 observer
+          t.expressionStatement(
+            t.assignmentExpression(
+              '=',
+              t.memberExpression(
+                t.identifier(observerRefName),
+                t.identifier('current'),
+              ),
+              t.newExpression(t.identifier('IntersectionObserver'), [
+                t.arrowFunctionExpression(
+                  [t.arrayPattern([t.identifier('entry')])],
+                  t.blockStatement([
+                    t.ifStatement(
+                      t.memberExpression(
+                        t.identifier('entry'),
+                        t.identifier('isIntersecting'),
+                      ),
+                      t.blockStatement([
+                        t.ifStatement(
+                          t.memberExpression(
+                            t.identifier('window'),
+                            t.identifier('tracking'),
+                          ),
+                          t.blockStatement([
+                            t.expressionStatement(
+                              t.callExpression(
+                                t.memberExpression(
+                                  t.memberExpression(
+                                    t.identifier('window'),
+                                    t.identifier('tracking'),
+                                  ),
+                                  t.identifier('show'),
+                                ),
+                                [trackValueExpr],
+                              ),
+                            ),
+                          ]),
+                        ),
+                        t.expressionStatement(
+                          t.callExpression(
+                            t.memberExpression(
+                              t.memberExpression(
+                                t.identifier(observerRefName),
+                                t.identifier('current'),
+                              ),
+                              t.identifier('disconnect'),
+                            ),
+                            [],
+                          ),
+                        ),
+                      ]),
+                    ),
+                  ]),
+                ),
+                t.objectExpression([
+                  t.objectProperty(
+                    t.identifier('threshold'),
+                    t.numericLiteral(0.1),
+                  ),
+                ]),
+              ]),
+            ),
+          ),
+          // 开始观察元素
+          t.expressionStatement(
+            t.callExpression(
+              t.memberExpression(
+                t.memberExpression(
+                  t.identifier(observerRefName),
+                  t.identifier('current'),
+                ),
+                t.identifier('observe'),
+              ),
+              [t.identifier('element')],
+            ),
+          ),
+        ]),
+      ),
+    );
+
+    // 添加清理代码
+    cleanupStatements.push(
+      t.ifStatement(
+        t.memberExpression(
+          t.identifier(observerRefName),
+          t.identifier('current'),
+        ),
+        t.blockStatement([
+          t.expressionStatement(
+            t.callExpression(
+              t.memberExpression(
+                t.memberExpression(
+                  t.identifier(observerRefName),
+                  t.identifier('current'),
+                ),
+                t.identifier('disconnect'),
+              ),
+              [],
+            ),
+          ),
+        ]),
+      ),
+    );
+  });
+
+  // 添加清理函数
+  if (cleanupStatements.length > 0) {
+    useEffectStatements.push(
+      t.returnStatement(
+        t.arrowFunctionExpression([], t.blockStatement(cleanupStatements)),
+      ),
+    );
+  }
+
+  const useEffectCall = t.expressionStatement(
+    t.callExpression(t.identifier('useEffect'), [
+      t.arrowFunctionExpression([], t.blockStatement(useEffectStatements)),
+      t.arrayExpression([]),
+    ]),
+  );
+
+  // 合并 observer ref 声明和 useEffect
+  const allStatements = [...observerRefDeclarations, useEffectCall];
+
+  // 找到组件的开始位置，在 return 语句前添加 useEffect
+  const componentBody = path.node.body.find(
+    (node) => t.isFunctionDeclaration(node) || t.isVariableDeclaration(node),
+  );
+
+  if (componentBody) {
+    if (t.isFunctionDeclaration(componentBody)) {
+      const returnStatement = componentBody.body.body.find((stmt) =>
+        t.isReturnStatement(stmt),
+      );
+      if (returnStatement) {
+        const returnIndex = componentBody.body.body.indexOf(returnStatement);
+        componentBody.body.body.splice(returnIndex, 0, ...allStatements);
+      }
+    } else if (t.isVariableDeclaration(componentBody)) {
+      // 处理 const Component = () => {} 的情况
+      const declarator = componentBody.declarations[0];
+      if (
+        t.isVariableDeclarator(declarator) &&
+        t.isArrowFunctionExpression(declarator.init)
+      ) {
+        const returnStatement = declarator.init.body.body.find((stmt) =>
+          t.isReturnStatement(stmt),
+        );
+        if (returnStatement) {
+          const returnIndex =
+            declarator.init.body.body.indexOf(returnStatement);
+          declarator.init.body.body.splice(returnIndex, 0, ...allStatements);
+        }
+      }
+    }
   }
 }
 
