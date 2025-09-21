@@ -1,8 +1,11 @@
+import { Suspense, lazy } from 'react';
 import { Link, Route, Routes } from 'react-router-dom';
 import './App.css';
-import AutoTrackedPage from './AutoTrackedPage';
-import OriginalPage from './OriginalPage';
-import TrackedPage from './TrackedPage';
+
+// 动态引入页面组件
+const AutoTrackedPage = lazy(() => import('./AutoTrackedPage'));
+const OriginalPage = lazy(() => import('./OriginalPage'));
+const TrackedPage = lazy(() => import('./TrackedPage'));
 
 const Home = () => (
   <div className="content">
@@ -25,15 +28,27 @@ const App = () => {
       />
       <Route
         path="/original"
-        element={<OriginalPage />}
+        element={
+          <Suspense fallback={<div>Loading...</div>}>
+            <OriginalPage />
+          </Suspense>
+        }
       />
       <Route
         path="/tracked"
-        element={<TrackedPage />}
+        element={
+          <Suspense fallback={<div>Loading...</div>}>
+            <TrackedPage />
+          </Suspense>
+        }
       />
       <Route
         path="/auto-tracked"
-        element={<AutoTrackedPage />}
+        element={
+          <Suspense fallback={<div>Loading...</div>}>
+            <AutoTrackedPage />
+          </Suspense>
+        }
       />
     </Routes>
   );
