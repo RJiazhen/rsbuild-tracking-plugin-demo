@@ -7,6 +7,7 @@ const AutoTrackedPage = () => {
 
   const handleBannerClick = () => {
     alert("点击了广告"); // 故意使用单引号
+    console.log("测试日志"); // 添加新的代码行
   };
 
   const handleCloseBanner = (e: React.MouseEvent) => {
