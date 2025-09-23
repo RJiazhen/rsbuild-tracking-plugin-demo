@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 // @ts-ignore
-import 'http://localhost:3000/tracking.js';
+import 'http://localhost:3000/tracking.js'; // 引入埋点脚本
 
 declare global {
   interface Window {
@@ -15,19 +15,18 @@ const TrackedPage = () => {
   const [showBanner, setShowBanner] = useState(true);
   const bannerRef = useRef<HTMLDivElement>(null);
 
+  // 使用 IntersectionObserver 监听广告元素的可见性
   useEffect(() => {
     if (!showBanner || !bannerRef.current) return;
 
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) {
-          if (window.tracking) {
-            window.tracking.show('ad');
-          }
+          window?.tracking?.show('ad'); // 发送显示埋点事件
           observer.disconnect();
         }
       },
-      { threshold: 0.1 }, // Trigger when 10% of the banner is visible
+      { threshold: 0.1 }, // 当广告元素可见度达到 10% 时触发
     );
 
     observer.observe(bannerRef.current);
@@ -38,9 +37,7 @@ const TrackedPage = () => {
   }, [showBanner]);
 
   const handleBannerClick = () => {
-    if (window.tracking) {
-      window.tracking.click('ad');
-    }
+    window?.tracking?.click('ad'); // 发送点击埋点事件
     alert('点击了广告');
   };
 

@@ -3,6 +3,40 @@ import * as t from '@babel/types';
 import fs from 'fs';
 import path from 'path';
 
+// 全局埋点数据存储
+const globalTrackingData = new Map();
+
+/**
+ * 检查全局重复埋点并打印警告
+ */
+function checkGlobalDuplicateTracking(newTrackingData, filePath) {
+  const key = `${newTrackingData.type}:${newTrackingData.name}`;
+
+  if (globalTrackingData.has(key)) {
+    const existingData = globalTrackingData.get(key);
+    const currentRelativePath = path.relative(process.cwd(), filePath);
+    const existingRelativePath = path.relative(
+      process.cwd(),
+      existingData.filePath,
+    );
+
+    console.warn(
+      `⚠️ 检测到全局重复埋点:\n` +
+        `   类型: ${newTrackingData.type}\n` +
+        `   名称: ${newTrackingData.name}\n` +
+        `   已存在: ${existingRelativePath} (${existingData.elementName})\n` +
+        `   重复位置: ${currentRelativePath} (${newTrackingData.elementName})\n` +
+        `   建议: 请使用不同的埋点名称或检查是否应该合并这些埋点`,
+    );
+  } else {
+    // 存储新的埋点数据
+    globalTrackingData.set(key, {
+      ...newTrackingData,
+      filePath,
+    });
+  }
+}
+
 /**
  * Rspack Loader for auto-tracking
  * 处理 TSX 文件，移除 data-track 属性并添加埋点事件
@@ -359,23 +393,31 @@ function addTrackingRefAndEvents(
     });
 
     // 收集埋点信息
-    trackingData.push({
+    const showTrackingData = {
       type: 'show',
       name: typeof trackShowValue === 'string' ? trackShowValue : 'dynamic',
       filePath: filePath,
       elementName: getElementName(node),
-    });
+    };
+
+    // 检查全局重复埋点
+    checkGlobalDuplicateTracking(showTrackingData, filePath);
+    trackingData.push(showTrackingData);
   }
 
   // 记录需要添加点击事件的元素
   if (trackClickValue) {
     // 收集埋点信息
-    trackingData.push({
+    const clickTrackingData = {
       type: 'click',
       name: typeof trackClickValue === 'string' ? trackClickValue : 'dynamic',
       filePath: filePath,
       elementName: getElementName(node),
-    });
+    };
+
+    // 检查全局重复埋点
+    checkGlobalDuplicateTracking(clickTrackingData, filePath);
+    trackingData.push(clickTrackingData);
   }
 }
 
