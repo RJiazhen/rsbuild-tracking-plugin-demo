@@ -8,6 +8,14 @@ if ! git diff --quiet; then
   echo "代码已被格式化，正在添加修改的文件..."
   git add .
   echo "已添加格式化后的文件到暂存区"
+  
+  # 检查是否有实际的代码变更（排除只修改换行符的情况）
+  if git diff --cached --quiet; then
+    echo "警告：格式化后没有实际的代码变更，可能是换行符修改"
+    echo "取消此次提交以避免空提交"
+    git reset
+    exit 1
+  fi
 else
   echo "代码格式检查通过，无需修改"
 fi
