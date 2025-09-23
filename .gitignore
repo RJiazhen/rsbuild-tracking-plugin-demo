@@ -7,6 +7,13 @@
 node_modules
 dist/
 
+# Transformed files
+transformed-files/
+
+# Tracking data
+tracking-data/*
+!tracking-data/README.md
+
 # Profile
 .rspack-profile-*/
 

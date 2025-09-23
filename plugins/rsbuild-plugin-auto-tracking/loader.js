@@ -9,20 +9,21 @@ import path from 'path';
  */
 function autoTrackingLoader(source) {
   const options = this.getOptions() || {};
+  const resourcePath = this.resourcePath;
 
   try {
     const result = transform(source, {
-      filename: this.resourcePath,
+      filename: resourcePath,
       presets: [
         ['@babel/preset-react', { runtime: 'automatic' }],
         '@babel/preset-typescript',
       ],
-      plugins: [[trackingPlugin, options]],
+      plugins: [[trackingPlugin, { ...options, resourcePath }]],
     });
 
     // 检查是否需要输出转换后的文件
     if (options.outputTransformedFiles !== false) {
-      outputTransformedFile(this.resourcePath, result.code);
+      outputTransformedFile(resourcePath, result.code);
     }
 
     return result.code;
@@ -63,27 +64,127 @@ function outputTransformedFile(originalPath, transformedCode) {
 }
 
 /**
+ * 生成埋点信息文件
+ */
+function generateTrackingDataFile(trackingData, resourcePath) {
+  if (trackingData.length === 0) return;
+
+  try {
+    // 创建埋点信息目录
+    const trackingDir = path.join(process.cwd(), 'tracking-data');
+    if (!fs.existsSync(trackingDir)) {
+      fs.mkdirSync(trackingDir, { recursive: true });
+    }
+
+    // 生成相对路径
+    const relativePath = resourcePath
+      ? path.relative(process.cwd(), resourcePath)
+      : 'unknown-file';
+
+    // 为每个文件生成单独的埋点信息文件
+    const fileName = path.basename(relativePath, path.extname(relativePath));
+    const outputPath = path.join(trackingDir, `${fileName}-tracking.json`);
+
+    // 生成埋点信息
+    const trackingInfo = {
+      file: relativePath,
+      timestamp: new Date().toISOString(),
+      tracking: trackingData.map((item) => ({
+        type: item.type,
+        name: item.name,
+        elementName: item.elementName,
+      })),
+    };
+
+    // 写入埋点信息文件
+    fs.writeFileSync(outputPath, JSON.stringify(trackingInfo, null, 2), 'utf8');
+
+    // 更新汇总文件
+    updateTrackingSummary(trackingInfo);
+
+    console.log(`📊 埋点信息已输出: ${outputPath}`);
+  } catch (error) {
+    console.warn(`⚠️ 输出埋点信息失败: ${error.message}`);
+  }
+}
+
+/**
+ * 更新埋点汇总文件
+ */
+function updateTrackingSummary(trackingInfo) {
+  try {
+    const trackingDir = path.join(process.cwd(), 'tracking-data');
+    const summaryPath = path.join(trackingDir, 'tracking-summary.json');
+
+    let summary = {
+      files: [],
+      totalTracking: 0,
+      lastUpdated: new Date().toISOString(),
+    };
+
+    // 如果汇总文件存在，读取现有数据
+    if (fs.existsSync(summaryPath)) {
+      const existingData = fs.readFileSync(summaryPath, 'utf8');
+      summary = JSON.parse(existingData);
+    }
+
+    // 更新或添加文件信息
+    const existingFileIndex = summary.files.findIndex(
+      (f) => f.file === trackingInfo.file,
+    );
+    if (existingFileIndex >= 0) {
+      summary.files[existingFileIndex] = trackingInfo;
+    } else {
+      summary.files.push(trackingInfo);
+    }
+
+    // 重新计算总数
+    summary.totalTracking = summary.files.reduce(
+      (total, file) => total + file.tracking.length,
+      0,
+    );
+    summary.lastUpdated = new Date().toISOString();
+
+    // 写入汇总文件
+    fs.writeFileSync(summaryPath, JSON.stringify(summary, null, 2), 'utf8');
+
+    console.log(`📋 埋点汇总已更新: ${summaryPath}`);
+  } catch (error) {
+    console.warn(`⚠️ 更新埋点汇总失败: ${error.message}`);
+  }
+}
+
+/**
  * Babel plugin for tracking transformation
  */
-function trackingPlugin({ types: t }) {
+function trackingPlugin({ types: t, resourcePath }) {
   let hasTrackingAttributes = false;
   let trackingElements = [];
   let showElements = []; // Stores { refName, trackValue } for show events
+  let trackingData = []; // Stores tracking information for file generation
 
   return {
     visitor: {
       Program: {
-        enter(path) {
+        enter(path, state) {
           hasTrackingAttributes = false;
           trackingElements = [];
           showElements = [];
+          trackingData = [];
+          // 从 state 中获取文件路径
+          const filePath = state.filename || resourcePath || 'unknown-file';
+          state.trackingData = trackingData;
+          state.filePath = filePath;
         },
-        exit(path) {
+        exit(path, state) {
           // 如果检测到埋点属性，添加 import 语句和 useEffect
           if (hasTrackingAttributes) {
+            const filePath = state.filePath || resourcePath || 'unknown-file';
             addTrackingImport(path, t);
             addTrackingUseEffect(path, t, trackingElements);
             addShowTrackingUseEffect(path, t, showElements);
+            // 生成埋点信息文件
+            generateTrackingDataFile(trackingData, filePath);
           }
         },
       },
@@ -107,6 +208,8 @@ function trackingPlugin({ types: t }) {
             trackClickValue,
             trackingElements,
             showElements,
+            trackingData,
+            resourcePath || 'unknown',
           );
         }
       },
@@ -147,6 +250,23 @@ function getAttributeValue(jsxElement, attributeName) {
   }
 
   return null;
+}
+
+/**
+ * 获取元素名称
+ */
+function getElementName(node) {
+  const elementName = node.openingElement.name;
+
+  if (t.isJSXIdentifier(elementName)) {
+    return elementName.name;
+  } else if (t.isJSXMemberExpression(elementName)) {
+    return `${elementName.object.name}.${elementName.property.name}`;
+  } else if (t.isJSXNamespacedName(elementName)) {
+    return `${elementName.namespace.name}:${elementName.name.name}`;
+  }
+
+  return 'unknown';
 }
 
 /**
@@ -207,6 +327,8 @@ function addTrackingRefAndEvents(
   trackClickValue,
   trackingElements,
   showElements,
+  trackingData,
+  filePath,
 ) {
   const { node } = path;
   const attributes = node.openingElement.attributes;
@@ -234,6 +356,25 @@ function addTrackingRefAndEvents(
     showElements.push({
       refName,
       trackValue: trackShowValue,
+    });
+
+    // 收集埋点信息
+    trackingData.push({
+      type: 'show',
+      name: typeof trackShowValue === 'string' ? trackShowValue : 'dynamic',
+      filePath: filePath,
+      elementName: getElementName(node),
+    });
+  }
+
+  // 记录需要添加点击事件的元素
+  if (trackClickValue) {
+    // 收集埋点信息
+    trackingData.push({
+      type: 'click',
+      name: typeof trackClickValue === 'string' ? trackClickValue : 'dynamic',
+      filePath: filePath,
+      elementName: getElementName(node),
     });
   }
 }
