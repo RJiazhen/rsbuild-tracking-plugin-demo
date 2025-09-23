@@ -1,0 +1,11 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "启动开发服务器",
+      "command": "pnpm dev",
+      "request": "launch",
+      "type": "node-terminal",
+    },
+  ]
+}
