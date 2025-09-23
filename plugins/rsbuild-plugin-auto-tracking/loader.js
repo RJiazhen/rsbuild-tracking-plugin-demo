@@ -1,39 +1,66 @@
-import { transform } from '@babel/core';
-import * as t from '@babel/types';
-import fs from 'fs';
-import path from 'path';
-
-// 全局埋点数据存储
-const globalTrackingData = new Map();
+import { transform } from "@babel/core";
+import * as t from "@babel/types";
+import fs from "fs";
+import path from "path";
 
 /**
- * 检查全局重复埋点并打印警告
+ * 分析埋点信息文件，检测同页面内的重复埋点
  */
-function checkGlobalDuplicateTracking(newTrackingData, filePath) {
-  const key = `${newTrackingData.type}:${newTrackingData.name}`;
+function analyzeTrackingFilesForDuplicates(trackingData, filePath) {
+  try {
+    const trackingDir = path.join(process.cwd(), "tracking-data");
+    const summaryPath = path.join(trackingDir, "tracking-summary.json");
 
-  if (globalTrackingData.has(key)) {
-    const existingData = globalTrackingData.get(key);
-    const currentRelativePath = path.relative(process.cwd(), filePath);
-    const existingRelativePath = path.relative(
-      process.cwd(),
-      existingData.filePath,
-    );
+    // 如果汇总文件不存在，直接返回
+    if (!fs.existsSync(summaryPath)) {
+      return;
+    }
 
-    console.warn(
-      `⚠️ 检测到全局重复埋点:\n` +
-        `   类型: ${newTrackingData.type}\n` +
-        `   名称: ${newTrackingData.name}\n` +
-        `   已存在: ${existingRelativePath} (${existingData.elementName})\n` +
-        `   重复位置: ${currentRelativePath} (${newTrackingData.elementName})\n` +
-        `   建议: 请使用不同的埋点名称或检查是否应该合并这些埋点`,
+    // 读取汇总文件
+    const summaryData = JSON.parse(fs.readFileSync(summaryPath, "utf8"));
+    const currentFile = path.relative(process.cwd(), filePath);
+
+    // 查找当前文件的埋点信息
+    const currentFileData = summaryData.files.find(
+      (file) => file.file === currentFile
     );
-  } else {
-    // 存储新的埋点数据
-    globalTrackingData.set(key, {
-      ...newTrackingData,
-      filePath,
+    if (!currentFileData) {
+      return;
+    }
+
+    // 检查当前文件内的重复埋点
+    const trackingMap = new Map();
+    const duplicates = [];
+
+    currentFileData.tracking.forEach((tracking) => {
+      const key = `${tracking.type}:${tracking.name}`;
+      if (trackingMap.has(key)) {
+        duplicates.push({
+          key,
+          type: tracking.type,
+          name: tracking.name,
+          existing: trackingMap.get(key),
+          duplicate: tracking,
+        });
+      } else {
+        trackingMap.set(key, tracking);
+      }
     });
+
+    // 输出重复埋点警告
+    duplicates.forEach((dup) => {
+      console.warn(
+        `⚠️ 检测到同页面内重复埋点:\n` +
+          `   文件: ${currentFile}\n` +
+          `   类型: ${dup.type}\n` +
+          `   名称: ${dup.name}\n` +
+          `   已存在: ${dup.existing.elementName}\n` +
+          `   重复位置: ${dup.duplicate.elementName}\n` +
+          `   建议: 请使用不同的埋点名称或检查是否应该合并这些埋点`
+      );
+    });
+  } catch (error) {
+    console.warn(`⚠️ 分析埋点文件失败: ${error.message}`);
   }
 }
 
@@ -49,11 +76,16 @@ function autoTrackingLoader(source) {
     const result = transform(source, {
       filename: resourcePath,
       presets: [
-        ['@babel/preset-react', { runtime: 'automatic' }],
-        '@babel/preset-typescript',
+        ["@babel/preset-react", { runtime: "automatic" }],
+        "@babel/preset-typescript",
       ],
       plugins: [[trackingPlugin, { ...options, resourcePath }]],
     });
+
+    if (!result) {
+      this.emitError(new Error("Transform failed"));
+      return source;
+    }
 
     // 检查是否需要输出转换后的文件
     if (options.outputTransformedFiles !== false) {
@@ -73,7 +105,7 @@ function autoTrackingLoader(source) {
 function outputTransformedFile(originalPath, transformedCode) {
   try {
     // 创建输出目录
-    const outputDir = path.join(process.cwd(), 'transformed-files');
+    const outputDir = path.join(process.cwd(), "transformed-files");
     if (!fs.existsSync(outputDir)) {
       fs.mkdirSync(outputDir, { recursive: true });
     }
@@ -89,7 +121,7 @@ function outputTransformedFile(originalPath, transformedCode) {
     }
 
     // 写入转换后的代码
-    fs.writeFileSync(outputPath, transformedCode, 'utf8');
+    fs.writeFileSync(outputPath, transformedCode, "utf8");
 
     console.log(`✅ 转换后的文件已输出: ${outputPath}`);
   } catch (error) {
@@ -105,7 +137,7 @@ function generateTrackingDataFile(trackingData, resourcePath) {
 
   try {
     // 创建埋点信息目录
-    const trackingDir = path.join(process.cwd(), 'tracking-data');
+    const trackingDir = path.join(process.cwd(), "tracking-data");
     if (!fs.existsSync(trackingDir)) {
       fs.mkdirSync(trackingDir, { recursive: true });
     }
@@ -113,7 +145,7 @@ function generateTrackingDataFile(trackingData, resourcePath) {
     // 生成相对路径
     const relativePath = resourcePath
       ? path.relative(process.cwd(), resourcePath)
-      : 'unknown-file';
+      : "unknown-file";
 
     // 为每个文件生成单独的埋点信息文件
     const fileName = path.basename(relativePath, path.extname(relativePath));
@@ -131,7 +163,7 @@ function generateTrackingDataFile(trackingData, resourcePath) {
     };
 
     // 写入埋点信息文件
-    fs.writeFileSync(outputPath, JSON.stringify(trackingInfo, null, 2), 'utf8');
+    fs.writeFileSync(outputPath, JSON.stringify(trackingInfo, null, 2), "utf8");
 
     // 更新汇总文件
     updateTrackingSummary(trackingInfo);
@@ -147,8 +179,8 @@ function generateTrackingDataFile(trackingData, resourcePath) {
  */
 function updateTrackingSummary(trackingInfo) {
   try {
-    const trackingDir = path.join(process.cwd(), 'tracking-data');
-    const summaryPath = path.join(trackingDir, 'tracking-summary.json');
+    const trackingDir = path.join(process.cwd(), "tracking-data");
+    const summaryPath = path.join(trackingDir, "tracking-summary.json");
 
     let summary = {
       files: [],
@@ -158,13 +190,17 @@ function updateTrackingSummary(trackingInfo) {
 
     // 如果汇总文件存在，读取现有数据
     if (fs.existsSync(summaryPath)) {
-      const existingData = fs.readFileSync(summaryPath, 'utf8');
+      const existingData = fs.readFileSync(summaryPath, "utf8");
       summary = JSON.parse(existingData);
+      // 确保 summary 有正确的结构
+      if (!summary.files) {
+        summary.files = [];
+      }
     }
 
     // 更新或添加文件信息
     const existingFileIndex = summary.files.findIndex(
-      (f) => f.file === trackingInfo.file,
+      (f) => f && f.file === trackingInfo.file
     );
     if (existingFileIndex >= 0) {
       summary.files[existingFileIndex] = trackingInfo;
@@ -174,13 +210,14 @@ function updateTrackingSummary(trackingInfo) {
 
     // 重新计算总数
     summary.totalTracking = summary.files.reduce(
-      (total, file) => total + file.tracking.length,
-      0,
+      (total, file) =>
+        total + (file && file.tracking ? file.tracking.length : 0),
+      0
     );
     summary.lastUpdated = new Date().toISOString();
 
     // 写入汇总文件
-    fs.writeFileSync(summaryPath, JSON.stringify(summary, null, 2), 'utf8');
+    fs.writeFileSync(summaryPath, JSON.stringify(summary, null, 2), "utf8");
 
     console.log(`📋 埋点汇总已更新: ${summaryPath}`);
   } catch (error) {
@@ -206,19 +243,21 @@ function trackingPlugin({ types: t, resourcePath }) {
           showElements = [];
           trackingData = [];
           // 从 state 中获取文件路径
-          const filePath = state.filename || resourcePath || 'unknown-file';
+          const filePath = state.filename || resourcePath || "unknown-file";
           state.trackingData = trackingData;
           state.filePath = filePath;
         },
         exit(path, state) {
           // 如果检测到埋点属性，添加 import 语句和 useEffect
           if (hasTrackingAttributes) {
-            const filePath = state.filePath || resourcePath || 'unknown-file';
+            const filePath = state.filePath || resourcePath || "unknown-file";
             addTrackingImport(path, t);
             addTrackingUseEffect(path, t, trackingElements);
             addShowTrackingUseEffect(path, t, showElements);
             // 生成埋点信息文件
             generateTrackingDataFile(trackingData, filePath);
+            // 分析埋点文件检测重复
+            analyzeTrackingFilesForDuplicates(trackingData, filePath);
           }
         },
       },
@@ -226,8 +265,8 @@ function trackingPlugin({ types: t, resourcePath }) {
         const { node } = path;
 
         // 检查是否有 data-track-show 或 data-track-click 属性
-        const trackShowValue = getAttributeValue(node, 'data-track-show');
-        const trackClickValue = getAttributeValue(node, 'data-track-click');
+        const trackShowValue = getAttributeValue(node, "data-track-show");
+        const trackClickValue = getAttributeValue(node, "data-track-click");
 
         if (trackShowValue || trackClickValue) {
           hasTrackingAttributes = true;
@@ -243,7 +282,7 @@ function trackingPlugin({ types: t, resourcePath }) {
             trackingElements,
             showElements,
             trackingData,
-            resourcePath || 'unknown',
+            resourcePath || "unknown"
           );
         }
       },
@@ -259,7 +298,7 @@ function hasAttribute(jsxElement, attributeName) {
     (attr) =>
       t.isJSXAttribute(attr) &&
       t.isJSXIdentifier(attr.name) &&
-      attr.name.name === attributeName,
+      attr.name.name === attributeName
   );
 }
 
@@ -271,7 +310,7 @@ function getAttributeValue(jsxElement, attributeName) {
     (attr) =>
       t.isJSXAttribute(attr) &&
       t.isJSXIdentifier(attr.name) &&
-      attr.name.name === attributeName,
+      attr.name.name === attributeName
   );
 
   if (attr && attr.value) {
@@ -295,12 +334,24 @@ function getElementName(node) {
   if (t.isJSXIdentifier(elementName)) {
     return elementName.name;
   } else if (t.isJSXMemberExpression(elementName)) {
-    return `${elementName.object.name}.${elementName.property.name}`;
+    const objectName = t.isJSXIdentifier(elementName.object)
+      ? elementName.object.name
+      : "unknown";
+    const propertyName = t.isJSXIdentifier(elementName.property)
+      ? elementName.property.name
+      : "unknown";
+    return `${objectName}.${propertyName}`;
   } else if (t.isJSXNamespacedName(elementName)) {
-    return `${elementName.namespace.name}:${elementName.name.name}`;
+    const namespaceName = t.isJSXIdentifier(elementName.namespace)
+      ? elementName.namespace.name
+      : "unknown";
+    const nameName = t.isJSXIdentifier(elementName.name)
+      ? elementName.name.name
+      : "unknown";
+    return `${namespaceName}:${nameName}`;
   }
 
-  return 'unknown';
+  return "unknown";
 }
 
 /**
@@ -313,9 +364,9 @@ function removeTrackAttributes(jsxElement) {
         !(
           t.isJSXAttribute(attr) &&
           t.isJSXIdentifier(attr.name) &&
-          (attr.name.name === 'data-track-show' ||
-            attr.name.name === 'data-track-click')
-        ),
+          (attr.name.name === "data-track-show" ||
+            attr.name.name === "data-track-click")
+        )
     );
 }
 
@@ -327,19 +378,19 @@ function addTrackingImport(path, t) {
   const hasImport = path.node.body.some(
     (node) =>
       t.isImportDeclaration(node) &&
-      node.source.value === 'http://localhost:3000/tracking.js',
+      node.source.value === "http://localhost:3000/tracking.js"
   );
 
   if (!hasImport) {
     // 在文件顶部添加 import 语句
     const importStatement = t.importDeclaration(
       [],
-      t.stringLiteral('http://localhost:3000/tracking.js'),
+      t.stringLiteral("http://localhost:3000/tracking.js")
     );
 
     // 找到第一个 import 语句的位置
     const firstImportIndex = path.node.body.findIndex((node) =>
-      t.isImportDeclaration(node),
+      t.isImportDeclaration(node)
     );
 
     if (firstImportIndex >= 0) {
@@ -362,7 +413,7 @@ function addTrackingRefAndEvents(
   trackingElements,
   showElements,
   trackingData,
-  filePath,
+  filePath
 ) {
   const { node } = path;
   const attributes = node.openingElement.attributes;
@@ -372,8 +423,8 @@ function addTrackingRefAndEvents(
 
   // 添加 ref 属性
   const refAttr = t.jsxAttribute(
-    t.jsxIdentifier('ref'),
-    t.jsxExpressionContainer(t.identifier(refName)),
+    t.jsxIdentifier("ref"),
+    t.jsxExpressionContainer(t.identifier(refName))
   );
   attributes.push(refAttr);
 
@@ -394,14 +445,12 @@ function addTrackingRefAndEvents(
 
     // 收集埋点信息
     const showTrackingData = {
-      type: 'show',
-      name: typeof trackShowValue === 'string' ? trackShowValue : 'dynamic',
+      type: "show",
+      name: typeof trackShowValue === "string" ? trackShowValue : "dynamic",
       filePath: filePath,
       elementName: getElementName(node),
     };
 
-    // 检查全局重复埋点
-    checkGlobalDuplicateTracking(showTrackingData, filePath);
     trackingData.push(showTrackingData);
   }
 
@@ -409,14 +458,12 @@ function addTrackingRefAndEvents(
   if (trackClickValue) {
     // 收集埋点信息
     const clickTrackingData = {
-      type: 'click',
-      name: typeof trackClickValue === 'string' ? trackClickValue : 'dynamic',
+      type: "click",
+      name: typeof trackClickValue === "string" ? trackClickValue : "dynamic",
       filePath: filePath,
       elementName: getElementName(node),
     };
 
-    // 检查全局重复埋点
-    checkGlobalDuplicateTracking(clickTrackingData, filePath);
     trackingData.push(clickTrackingData);
   }
 }
@@ -430,10 +477,10 @@ function addShowTrackingUseEffect(path, t, showElements) {
   // 生成 observer ref 声明
   const observerRefDeclarations = showElements.map(({ refName }, index) => {
     const observerRefName = `observerRef${index}`;
-    return t.variableDeclaration('const', [
+    return t.variableDeclaration("const", [
       t.variableDeclarator(
         t.identifier(observerRefName),
-        t.callExpression(t.identifier('useRef'), [t.nullLiteral()]),
+        t.callExpression(t.identifier("useRef"), [t.nullLiteral()])
       ),
     ]);
   });
@@ -445,27 +492,24 @@ function addShowTrackingUseEffect(path, t, showElements) {
   showElements.forEach(({ refName, trackValue }, index) => {
     const observerRefName = `observerRef${index}`;
     const trackValueExpr =
-      typeof trackValue === 'string' ? t.stringLiteral(trackValue) : trackValue;
+      typeof trackValue === "string" ? t.stringLiteral(trackValue) : trackValue;
 
     // 添加 IntersectionObserver 代码
     useEffectStatements.push(
       t.ifStatement(
-        t.memberExpression(t.identifier(refName), t.identifier('current')),
+        t.memberExpression(t.identifier(refName), t.identifier("current")),
         t.blockStatement([
-          t.variableDeclaration('const', [
+          t.variableDeclaration("const", [
             t.variableDeclarator(
-              t.identifier('element'),
-              t.memberExpression(
-                t.identifier(refName),
-                t.identifier('current'),
-              ),
+              t.identifier("element"),
+              t.memberExpression(t.identifier(refName), t.identifier("current"))
             ),
           ]),
           // 检查是否已经有 observer，如果有则先断开
           t.ifStatement(
             t.memberExpression(
               t.identifier(observerRefName),
-              t.identifier('current'),
+              t.identifier("current")
             ),
             t.blockStatement([
               t.expressionStatement(
@@ -473,77 +517,77 @@ function addShowTrackingUseEffect(path, t, showElements) {
                   t.memberExpression(
                     t.memberExpression(
                       t.identifier(observerRefName),
-                      t.identifier('current'),
+                      t.identifier("current")
                     ),
-                    t.identifier('disconnect'),
+                    t.identifier("disconnect")
                   ),
-                  [],
-                ),
+                  []
+                )
               ),
-            ]),
+            ])
           ),
           // 创建新的 observer
           t.expressionStatement(
             t.assignmentExpression(
-              '=',
+              "=",
               t.memberExpression(
                 t.identifier(observerRefName),
-                t.identifier('current'),
+                t.identifier("current")
               ),
-              t.newExpression(t.identifier('IntersectionObserver'), [
+              t.newExpression(t.identifier("IntersectionObserver"), [
                 t.arrowFunctionExpression(
-                  [t.arrayPattern([t.identifier('entry')])],
+                  [t.arrayPattern([t.identifier("entry")])],
                   t.blockStatement([
                     t.ifStatement(
                       t.memberExpression(
-                        t.identifier('entry'),
-                        t.identifier('isIntersecting'),
+                        t.identifier("entry"),
+                        t.identifier("isIntersecting")
                       ),
                       t.blockStatement([
                         t.ifStatement(
                           t.memberExpression(
-                            t.identifier('window'),
-                            t.identifier('tracking'),
+                            t.identifier("window"),
+                            t.identifier("tracking")
                           ),
                           t.blockStatement([
                             t.expressionStatement(
                               t.callExpression(
                                 t.memberExpression(
                                   t.memberExpression(
-                                    t.identifier('window'),
-                                    t.identifier('tracking'),
+                                    t.identifier("window"),
+                                    t.identifier("tracking")
                                   ),
-                                  t.identifier('show'),
+                                  t.identifier("show")
                                 ),
-                                [trackValueExpr],
-                              ),
+                                [trackValueExpr]
+                              )
                             ),
-                          ]),
+                          ])
                         ),
                         t.expressionStatement(
                           t.callExpression(
                             t.memberExpression(
                               t.memberExpression(
                                 t.identifier(observerRefName),
-                                t.identifier('current'),
+                                t.identifier("current")
                               ),
-                              t.identifier('disconnect'),
+                              t.identifier("disconnect")
                             ),
-                            [],
-                          ),
+                            []
+                          )
                         ),
-                      ]),
+                      ])
                     ),
-                  ]),
+                  ])
                 ),
                 t.objectExpression([
                   t.objectProperty(
-                    t.identifier('threshold'),
-                    t.numericLiteral(0.1),
+                    t.identifier("threshold"),
+                    t.numericLiteral(0.1)
                   ),
                 ]),
-              ]),
-            ),
+              ])
+            )
           ),
           // 开始观察元素
           t.expressionStatement(
@@ -551,15 +595,15 @@ function addShowTrackingUseEffect(path, t, showElements) {
               t.memberExpression(
                 t.memberExpression(
                   t.identifier(observerRefName),
-                  t.identifier('current'),
+                  t.identifier("current")
                 ),
-                t.identifier('observe'),
+                t.identifier("observe")
               ),
-              [t.identifier('element')],
-            ),
+              [t.identifier("element")]
+            )
           ),
-        ]),
-      ),
+        ])
+      )
     );
 
     // 添加清理代码
@@ -567,7 +611,7 @@ function addShowTrackingUseEffect(path, t, showElements) {
       t.ifStatement(
         t.memberExpression(
           t.identifier(observerRefName),
-          t.identifier('current'),
+          t.identifier("current")
         ),
         t.blockStatement([
           t.expressionStatement(
@@ -575,15 +619,15 @@ function addShowTrackingUseEffect(path, t, showElements) {
               t.memberExpression(
                 t.memberExpression(
                   t.identifier(observerRefName),
-                  t.identifier('current'),
+                  t.identifier("current")
                 ),
-                t.identifier('disconnect'),
+                t.identifier("disconnect")
               ),
-              [],
-            ),
+              []
+            )
           ),
-        ]),
-      ),
+        ])
+      )
     );
   });
 
@@ -591,16 +635,16 @@ function addShowTrackingUseEffect(path, t, showElements) {
   if (cleanupStatements.length > 0) {
     useEffectStatements.push(
       t.returnStatement(
-        t.arrowFunctionExpression([], t.blockStatement(cleanupStatements)),
-      ),
+        t.arrowFunctionExpression([], t.blockStatement(cleanupStatements))
+      )
     );
   }
 
   const useEffectCall = t.expressionStatement(
-    t.callExpression(t.identifier('useEffect'), [
+    t.callExpression(t.identifier("useEffect"), [
       t.arrowFunctionExpression([], t.blockStatement(useEffectStatements)),
       t.arrayExpression([]),
-    ]),
+    ])
   );
 
   // 合并 observer ref 声明和 useEffect
@@ -608,13 +652,13 @@ function addShowTrackingUseEffect(path, t, showElements) {
 
   // 找到组件的开始位置，在 return 语句前添加 useEffect
   const componentBody = path.node.body.find(
-    (node) => t.isFunctionDeclaration(node) || t.isVariableDeclaration(node),
+    (node) => t.isFunctionDeclaration(node) || t.isVariableDeclaration(node)
   );
 
   if (componentBody) {
     if (t.isFunctionDeclaration(componentBody)) {
       const returnStatement = componentBody.body.body.find((stmt) =>
-        t.isReturnStatement(stmt),
+        t.isReturnStatement(stmt)
       );
       if (returnStatement) {
         const returnIndex = componentBody.body.body.indexOf(returnStatement);
@@ -628,7 +672,7 @@ function addShowTrackingUseEffect(path, t, showElements) {
         t.isArrowFunctionExpression(declarator.init)
       ) {
         const returnStatement = declarator.init.body.body.find((stmt) =>
-          t.isReturnStatement(stmt),
+          t.isReturnStatement(stmt)
         );
         if (returnStatement) {
           const returnIndex =
@@ -650,41 +694,41 @@ function addTrackingUseEffect(path, t, trackingElements) {
   const hasUseEffect = path.node.body.some(
     (node) =>
       t.isImportDeclaration(node) &&
-      t.isStringLiteral(node.source, { value: 'react' }) &&
+      t.isStringLiteral(node.source, { value: "react" }) &&
       node.specifiers.some(
         (spec) =>
           t.isImportSpecifier(spec) &&
-          t.isIdentifier(spec.imported, { name: 'useEffect' }),
-      ),
+          t.isIdentifier(spec.imported, { name: "useEffect" })
+      )
   );
 
   const hasUseRef = path.node.body.some(
     (node) =>
       t.isImportDeclaration(node) &&
-      t.isStringLiteral(node.source, { value: 'react' }) &&
+      t.isStringLiteral(node.source, { value: "react" }) &&
       node.specifiers.some(
         (spec) =>
           t.isImportSpecifier(spec) &&
-          t.isIdentifier(spec.imported, { name: 'useRef' }),
-      ),
+          t.isIdentifier(spec.imported, { name: "useRef" })
+      )
   );
 
   const hasUseCallback = path.node.body.some(
     (node) =>
       t.isImportDeclaration(node) &&
-      t.isStringLiteral(node.source, { value: 'react' }) &&
+      t.isStringLiteral(node.source, { value: "react" }) &&
       node.specifiers.some(
         (spec) =>
           t.isImportSpecifier(spec) &&
-          t.isIdentifier(spec.imported, { name: 'useCallback' }),
-      ),
+          t.isIdentifier(spec.imported, { name: "useCallback" })
+      )
   );
 
   // 添加 useEffect 和 useRef 到 React 导入
   const reactImport = path.node.body.find(
     (node) =>
       t.isImportDeclaration(node) &&
-      t.isStringLiteral(node.source, { value: 'react' }),
+      t.isStringLiteral(node.source, { value: "react" })
   );
 
   if (reactImport) {
@@ -692,32 +736,32 @@ function addTrackingUseEffect(path, t, trackingElements) {
 
     if (!hasUseEffect) {
       specifiers.push(
-        t.importSpecifier(t.identifier('useEffect'), t.identifier('useEffect')),
+        t.importSpecifier(t.identifier("useEffect"), t.identifier("useEffect"))
       );
     }
 
     if (!hasUseRef) {
       specifiers.push(
-        t.importSpecifier(t.identifier('useRef'), t.identifier('useRef')),
+        t.importSpecifier(t.identifier("useRef"), t.identifier("useRef"))
       );
     }
 
     if (!hasUseCallback) {
       specifiers.push(
         t.importSpecifier(
-          t.identifier('useCallback'),
-          t.identifier('useCallback'),
-        ),
+          t.identifier("useCallback"),
+          t.identifier("useCallback")
+        )
       );
     }
   }
 
   // 生成 useRef 声明
   const useRefDeclarations = trackingElements.map(({ refName }) => {
-    return t.variableDeclaration('const', [
+    return t.variableDeclaration("const", [
       t.variableDeclarator(
         t.identifier(refName),
-        t.callExpression(t.identifier('useRef'), [t.nullLiteral()]),
+        t.callExpression(t.identifier("useRef"), [t.nullLiteral()])
       ),
     ]);
   });
@@ -727,44 +771,44 @@ function addTrackingUseEffect(path, t, trackingElements) {
     ({ refName, trackValue }, index) => {
       const callbackName = `trackingCallback${index}`;
       const trackValueExpr =
-        typeof trackValue === 'string'
+        typeof trackValue === "string"
           ? t.stringLiteral(trackValue)
           : trackValue;
 
-      return t.variableDeclaration('const', [
+      return t.variableDeclaration("const", [
         t.variableDeclarator(
           t.identifier(callbackName),
-          t.callExpression(t.identifier('useCallback'), [
+          t.callExpression(t.identifier("useCallback"), [
             t.arrowFunctionExpression(
               [],
               t.blockStatement([
                 t.ifStatement(
                   t.memberExpression(
-                    t.identifier('window'),
-                    t.identifier('tracking'),
+                    t.identifier("window"),
+                    t.identifier("tracking")
                   ),
                   t.blockStatement([
                     t.expressionStatement(
                       t.callExpression(
                         t.memberExpression(
                           t.memberExpression(
-                            t.identifier('window'),
-                            t.identifier('tracking'),
+                            t.identifier("window"),
+                            t.identifier("tracking")
                           ),
-                          t.identifier('click'),
+                          t.identifier("click")
                         ),
-                        [trackValueExpr],
-                      ),
+                        [trackValueExpr]
+                      )
                     ),
-                  ]),
+                  ])
                 ),
-              ]),
+              ])
             ),
             t.arrayExpression([]),
-          ]),
+          ])
         ),
       ]);
-    },
+    }
   );
 
   // 生成 useEffect 代码
@@ -774,71 +818,65 @@ function addTrackingUseEffect(path, t, trackingElements) {
   trackingElements.forEach(({ refName, trackValue }, index) => {
     const callbackName = `trackingCallback${index}`;
     const trackValueExpr =
-      typeof trackValue === 'string' ? t.stringLiteral(trackValue) : trackValue;
+      typeof trackValue === "string" ? t.stringLiteral(trackValue) : trackValue;
 
     // 添加事件监听器的代码
     useEffectStatements.push(
       t.ifStatement(
-        t.memberExpression(t.identifier(refName), t.identifier('current')),
+        t.memberExpression(t.identifier(refName), t.identifier("current")),
         t.blockStatement([
-          t.variableDeclaration('const', [
+          t.variableDeclaration("const", [
             t.variableDeclarator(
-              t.identifier('element'),
-              t.memberExpression(
-                t.identifier(refName),
-                t.identifier('current'),
-              ),
+              t.identifier("element"),
+              t.memberExpression(t.identifier(refName), t.identifier("current"))
             ),
           ]),
           // 先移除可能已存在的事件监听器，避免重复添加
           t.expressionStatement(
             t.callExpression(
               t.memberExpression(
-                t.identifier('element'),
-                t.identifier('removeEventListener'),
+                t.identifier("element"),
+                t.identifier("removeEventListener")
               ),
-              [t.stringLiteral('click'), t.identifier(callbackName)],
-            ),
+              [t.stringLiteral("click"), t.identifier(callbackName)]
+            )
           ),
           // 然后添加事件监听器
           t.expressionStatement(
             t.callExpression(
               t.memberExpression(
-                t.identifier('element'),
-                t.identifier('addEventListener'),
+                t.identifier("element"),
+                t.identifier("addEventListener")
               ),
-              [t.stringLiteral('click'), t.identifier(callbackName)],
-            ),
+              [t.stringLiteral("click"), t.identifier(callbackName)]
+            )
           ),
-        ]),
-      ),
+        ])
+      )
     );
 
     // 添加清理代码
     cleanupStatements.push(
       t.ifStatement(
-        t.memberExpression(t.identifier(refName), t.identifier('current')),
+        t.memberExpression(t.identifier(refName), t.identifier("current")),
         t.blockStatement([
-          t.variableDeclaration('const', [
+          t.variableDeclaration("const", [
             t.variableDeclarator(
-              t.identifier('element'),
-              t.memberExpression(
-                t.identifier(refName),
-                t.identifier('current'),
-              ),
+              t.identifier("element"),
+              t.memberExpression(t.identifier(refName), t.identifier("current"))
             ),
           ]),
           t.expressionStatement(
             t.callExpression(
               t.memberExpression(
-                t.identifier('element'),
-                t.identifier('removeEventListener'),
+                t.identifier("element"),
+                t.identifier("removeEventListener")
               ),
-              [t.stringLiteral('click'), t.identifier(callbackName)],
-            ),
+              [t.stringLiteral("click"), t.identifier(callbackName)]
+            )
           ),
-        ]),
-      ),
+        ])
+      )
     );
   });
 
@@ -846,16 +884,16 @@ function addTrackingUseEffect(path, t, trackingElements) {
   if (cleanupStatements.length > 0) {
     useEffectStatements.push(
       t.returnStatement(
-        t.arrowFunctionExpression([], t.blockStatement(cleanupStatements)),
-      ),
+        t.arrowFunctionExpression([], t.blockStatement(cleanupStatements))
+      )
     );
   }
 
   const useEffectCall = t.expressionStatement(
-    t.callExpression(t.identifier('useEffect'), [
+    t.callExpression(t.identifier("useEffect"), [
       t.arrowFunctionExpression([], t.blockStatement(useEffectStatements)),
       t.arrayExpression([]),
-    ]),
+    ])
   );
 
   // 合并 useRef 声明和 useEffect
@@ -867,13 +905,13 @@ function addTrackingUseEffect(path, t, trackingElements) {
 
   // 找到组件的开始位置，在 return 语句前添加 useEffect
   const componentBody = path.node.body.find(
-    (node) => t.isFunctionDeclaration(node) || t.isVariableDeclaration(node),
+    (node) => t.isFunctionDeclaration(node) || t.isVariableDeclaration(node)
   );
 
   if (componentBody) {
     if (t.isFunctionDeclaration(componentBody)) {
       const returnStatement = componentBody.body.body.find((stmt) =>
-        t.isReturnStatement(stmt),
+        t.isReturnStatement(stmt)
       );
       if (returnStatement) {
         const returnIndex = componentBody.body.body.indexOf(returnStatement);
@@ -887,7 +925,7 @@ function addTrackingUseEffect(path, t, trackingElements) {
         t.isArrowFunctionExpression(declarator.init)
       ) {
         const returnStatement = declarator.init.body.body.find((stmt) =>
-          t.isReturnStatement(stmt),
+          t.isReturnStatement(stmt)
         );
         if (returnStatement) {
           const returnIndex =
