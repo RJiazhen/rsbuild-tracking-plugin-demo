@@ -1,4 +1,6 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, {
+  useEffect, useRef, useState,
+} from "react";
 // @ts-expect-error - 动态导入外部脚本
 import "http://localhost:3000/tracking.js"; // 引入埋点脚本
 
@@ -28,7 +30,7 @@ const TrackedPage = () => {
       },
       {
         threshold: 0.1,
-      } // 当广告元素可见度达到 10% 时触发
+      }, // 当广告元素可见度达到 10% 时触发
     );
 
     observer.observe(bannerRef.current);
