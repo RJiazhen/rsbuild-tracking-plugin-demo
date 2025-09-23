@@ -26,5 +26,9 @@
     "@types/react-dom": "^19.1.9",
     "@types/react-router-dom": "^5.3.3",
     "typescript": "^5.9.2"
+  },
+  "volta": {
+    "node": "22.19.0",
+    "pnpm": "10.17.1"
   }
 }
