@@ -15,9 +15,16 @@ export default defineConfig([
       parserOptions: { ecmaFeatures: { jsx: true } },
     },
     plugins: { react: pluginReact, "react-hooks": reactHooks },
+    settings: {
+      react: {
+        version: "detect", // 自动检测 React 版本
+        jsx: "react-jsx", // 使用新的 JSX 转换
+      },
+    },
     rules: {
       // React 规则
-      "react/react-in-jsx-scope": "off",
+      "react/react-in-jsx-scope": "off", // 不需要在 JSX 中引入 React
+      "react/jsx-uses-react": "off", // 不需要使用 React
       "react-hooks/rules-of-hooks": "error",
       "react-hooks/exhaustive-deps": "warn",
 

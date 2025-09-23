@@ -1,4 +1,4 @@
-import React, {
+import {
   useEffect, useRef, useState,
 } from "react";
 // @ts-expect-error - 动态导入外部脚本
@@ -45,7 +45,7 @@ const TrackedPage = () => {
     alert("点击了广告");
   };
 
-  const handleCloseBanner = (e: React.MouseEvent) => {
+  const handleCloseBanner = (e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
     if (window.tracking) {
       window.tracking.click("close-ad");

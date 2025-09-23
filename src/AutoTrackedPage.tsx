@@ -1,4 +1,4 @@
-import React, {
+import {
   useState,
 } from "react";
 
@@ -9,7 +9,7 @@ const AutoTrackedPage = () => {
     alert("点击了广告");
   };
 
-  const handleCloseBanner = (e: React.MouseEvent) => {
+  const handleCloseBanner = (e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
     setShowBanner(false);
   }; // 添加一个格式问题：缺少分号
