@@ -12,7 +12,7 @@ const AutoTrackedPage = () => {
   const handleCloseBanner = (e: React.MouseEvent) => {
     e.stopPropagation();
     setShowBanner(false);
-  };
+  }; // 添加一个格式问题：缺少分号
 
   return (
     <div
