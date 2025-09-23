@@ -6,7 +6,7 @@ const AutoTrackedPage = () => {
   const [showBanner, setShowBanner] = useState(true);
 
   const handleBannerClick = () => {
-    alert("点击了广告");
+    alert("点击了广告"); // 故意使用单引号
   };
 
   const handleCloseBanner = (e: React.MouseEvent) => {
@@ -15,9 +15,10 @@ const AutoTrackedPage = () => {
   };
 
   return (
-    <div style={{
-      padding: "20px",
-    }}
+    <div
+      style={{
+        padding: "20px",
+      }}
     >
       <h1>自动埋点页面</h1>
       <p>这是一个很长的页面，滚动到底部可以看到广告。</p>

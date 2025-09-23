@@ -1,1 +1,11 @@
+#!/usr/bin/env sh
+
+# 执行代码格式化
 pnpm lint:fix
+
+# 检查是否有文件被修改
+if ! git diff --quiet; then
+  echo "代码已被格式化，正在添加修改的文件..."
+  git add .
+  echo "已添加格式化后的文件到暂存区"
+fi
