@@ -1,28 +1,42 @@
-import type { RspackPluginInstance } from '@rspack/core';
+import type { RsbuildPlugin } from '@rsbuild/core';
 import path from 'path';
 
-const PLUGIN_NAME = 'AutoTrackingRspackPlugin';
-
-class AutoTrackingRspackPlugin implements RspackPluginInstance {
-  name = PLUGIN_NAME;
-
-  apply(compiler: any) {
-    compiler.hooks.normalModuleFactory.tap(PLUGIN_NAME, (factory: any) => {
-      factory.hooks.beforeResolve.tapAsync(
-        PLUGIN_NAME,
-        (resolveData: any, callback: any) => {
-          // 只处理 .tsx 和 .jsx 文件
-          if (resolveData.request && /\.(tsx|jsx)$/.test(resolveData.request)) {
-            console.log('Adding loader to:', resolveData.request);
-            resolveData.request = `${path.resolve(__dirname, 'loader.js')}!${
-              resolveData.request
-            }`;
-          }
-          callback();
-        },
-      );
-    });
-  }
+export interface AutoTrackingOptions {
+  outputTransformedFiles?: boolean;
 }
 
-export const pluginAutoTracking = () => new AutoTrackingRspackPlugin();
+export const pluginAutoTracking = (
+  options: AutoTrackingOptions = {},
+): RsbuildPlugin => {
+  return {
+    name: 'plugin-auto-tracking',
+    setup(build) {
+      // 配置 rspack 的 module rules
+      build.modifyRspackConfig((config) => {
+        if (!config.module) {
+          config.module = {};
+        }
+        if (!config.module.rules) {
+          config.module.rules = [];
+        }
+
+        // 添加 auto-tracking loader 规则
+        config.module.rules.push({
+          test: /\.(tsx|jsx)$/,
+          use: [
+            {
+              loader: path.resolve(__dirname, 'loader.js'),
+              options: {
+                outputTransformedFiles:
+                  options.outputTransformedFiles !== false,
+              },
+            },
+          ],
+          exclude: /node_modules/,
+        });
+
+        return config;
+      });
+    },
+  };
+};
